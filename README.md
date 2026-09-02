@@ -4,6 +4,8 @@ A simple binary diffing tool that renders changed code as disassembly with capst
 
 *bindelta* compares two binaries at the byte level and disassembles the before/after code with [Capstone](https://www.capstone-engine.org/).
 
+> **Note:** only ELF binaries are supported right now. Raw binary & PE support is planned.
+
 ```diff
 $ bindelta test/program1 test/program2
 Comparing test/program1 (16000 bytes) and test/program2 (16000 bytes)...
