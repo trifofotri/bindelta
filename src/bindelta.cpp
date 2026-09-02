@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <unordered_map>
+#include <unistd.h>
 
 #include "bindelta.hpp"
 #include "binary/elf_file.hpp"
@@ -17,7 +18,9 @@ void print_usage_and_exit(char* ep) {
 
     printf("Usage: %s <options> binary1 binary2\n", ep);
     printf("Options:\n");
-    printf(" -h --help:              displays this.\n");
+    printf(" -h  --help:                 displays this.\n");
+    printf(" -v  --verbose:              show noisy metadata sections (build-id, comments, etc).\n");
+    printf(" -nc --no-color:             disable colored output.\n");
     exit(1);
 }
 
@@ -26,20 +29,50 @@ std::vector<uint8_t> slice_section(const std::vector<uint8_t>& raw, const bd::Se
     return std::vector<uint8_t>(raw.begin() + sec.file_offset, raw.begin() + sec.file_offset + sec.size);
 }
 
+bool is_noisy_section(const std::string& name) {
+    static const std::vector<std::string> noisy = {
+        ".note.gnu.build-id",
+        ".note.gnu.property",
+        ".note.ABI-tag",
+        ".comment",
+        ".gnu.version",
+        ".gnu.version_r",
+        ".shstrtab",
+    };
+    for (const auto& n : noisy) {
+        if (name == n) return true;
+    }
+    return false;
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         print_usage_and_exit(argv[0]);
     }
 
+    bool no_color_flag = false;
+    bool verbose_flag = false;
     bd::bdctx current_ctx;
     for (int argi = 1; argi < argc; argi++) {
         if (std::strcmp(argv[argi], "-h") == 0 || std::strcmp(argv[argi], "--help") == 0) print_usage_and_exit(argv[0]);
+        
+        if (std::strcmp(argv[argi], "-nc") == 0 || std::strcmp(argv[argi], "--no-color") == 0) {
+            no_color_flag = true;
+            continue;
+        }
+        
+        if (std::strcmp(argv[argi], "-v") == 0 || std::strcmp(argv[argi], "--verbose") == 0) {
+            verbose_flag = true;
+            continue;
+        }
+
         if (current_ctx.binary1path.empty()) {
             current_ctx.binary1path = argv[argi];
         } else {
             current_ctx.binary2path = argv[argi];
         }
     }
+    bd::g_color_enabled = !no_color_flag && isatty(fileno(stdout));
 
     if (current_ctx.binary1path.empty() || current_ctx.binary2path.empty()) print_usage_and_exit(argv[0]);
 
@@ -85,6 +118,8 @@ int main(int argc, char** argv) {
     }
 
     for (const auto& sec1 : elf1.sections()) {
+        if (!verbose_flag && is_noisy_section(sec1.name)) continue; /* skips useless noisy sections */
+
         auto it = b2_sections_by_name.find(sec1.name);
         if (it == b2_sections_by_name.end()) {
             printf("[removed] %s (not present in %s)\n", sec1.name.c_str(), current_ctx.binary2path.c_str());

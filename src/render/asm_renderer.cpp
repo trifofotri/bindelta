@@ -55,7 +55,7 @@ namespace bd {
         if (dimmed) {
             printf("%s\n", dim(full).c_str());
         } else {
-            printf("%s\n", (is_new ? green(full) : red(full)).c_str());
+            printf("%s\n", (is_new ? bg_green(full) : bg_red(full)).c_str());
         }
     }
 
