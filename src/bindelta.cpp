@@ -8,6 +8,8 @@
 #include "bindelta.hpp"
 #include "binary/elf_file.hpp"
 #include "diff/byte_diff.hpp"
+#include "render/asm_renderer.hpp"
+#include "render/color.hpp"
 
 void print_usage_and_exit(char* ep) {
     printf("bindelta\n");
@@ -99,9 +101,26 @@ int main(int argc, char** argv) {
         }
 
         printf("\n[%s] %zu changed region(s):\n", sec1.name.c_str(), regions.size());
-        for (const auto& r : regions) {
-            printf("  old: offset=0x%lx len=%lu   new: offset=0x%lx len=%lu\n", r.old_range.offset, r.old_range.length, r.new_range.offset, r.new_range.length);
-        }
+        if (sec1.executable) {
+            for (const auto& r : regions) {
+                // grab a bit of context around the changed bytes
+                uint64_t ctx_start = r.old_range.offset > 4 ? r.old_range.offset - 4 : 0;
+                uint64_t ctx_len = r.old_range.length + 8;
+
+                std::vector<uint8_t> old_ctx(bytes1.begin() + ctx_start, bytes1.begin() + std::min(bytes1.size(), ctx_start + ctx_len));
+                std::vector<uint8_t> new_ctx(bytes2.begin() + ctx_start, bytes2.begin() + std::min(bytes2.size(), ctx_start + ctx_len));
+
+                auto old_asm = bd::disassemble(old_ctx, sec1.virtual_address + ctx_start, elf1.is_64bit());
+                auto new_asm = bd::disassemble(new_ctx, sec2.virtual_address + ctx_start, elf2.is_64bit());
+
+                printf("\n%s\n", bd::cyan("[" + sec1.name + "] instruction diff:").c_str());
+                bd::print_asm_diff(old_asm, new_asm);
+            }
+        } else {
+            for (const auto& r : regions) {
+                printf("  old: offset=0x%lx len=%lu   new: offset=0x%lx len=%lu\n", r.old_range.offset, r.old_range.length, r.new_range.offset, r.new_range.length);
+            }
+        }  
     }
 
     // sections only present in binary2
