@@ -9,6 +9,8 @@
 #include "bindelta.hpp"
 #include "binary/elf_file.hpp"
 #include "diff/byte_diff.hpp"
+#include "diff/insn_diff.hpp"
+#include "diff/diff_config.hpp"
 #include "render/asm_renderer.hpp"
 #include "render/color.hpp"
 
@@ -18,9 +20,13 @@ void print_usage_and_exit(char* ep) {
 
     printf("Usage: %s <options> binary1 binary2\n", ep);
     printf("Options:\n");
-    printf(" -h  --help:                 displays this.\n");
-    printf(" -v  --verbose:              show noisy metadata sections (build-id, comments, etc).\n");
-    printf(" -nc --no-color:             disable colored output.\n");
+    printf(" -h    --help:                      displays this.\n");
+    printf(" -v    --verbose:                   show noisy metadata sections (build-id, comments, etc).\n");
+    printf(" -nc   --no-color:                  disable colored output.\n");
+    printf(" -nlcs --no-lcs:                    disable instruction-level alignment, fall back to raw byte-region diff.\n");
+    printf("       --window <n>:                instructions of context around each diff (default 40).\n");
+    printf("       --context <n>:               unchanged lines shown before/after a change (default 2).\n");
+    printf("       --merge-distance <n>:        byte distance to merge nearby diff regions (default 128).\n");
     exit(1);
 }
 
@@ -52,7 +58,9 @@ int main(int argc, char** argv) {
 
     bool no_color_flag = false;
     bool verbose_flag = false;
+    bool no_lcs_flag = false;
     bd::bdctx current_ctx;
+    bd::DiffConfig diff_config;
     for (int argi = 1; argi < argc; argi++) {
         if (std::strcmp(argv[argi], "-h") == 0 || std::strcmp(argv[argi], "--help") == 0) print_usage_and_exit(argv[0]);
         
@@ -63,6 +71,26 @@ int main(int argc, char** argv) {
         
         if (std::strcmp(argv[argi], "-v") == 0 || std::strcmp(argv[argi], "--verbose") == 0) {
             verbose_flag = true;
+            continue;
+        }
+
+        if (std::strcmp(argv[argi], "-nlcs") == 0 || std::strcmp(argv[argi], "--no-lcs") == 0) {
+            no_lcs_flag = true;
+            continue;
+        }
+
+        if (std::strcmp(argv[argi], "--window") == 0 && argi + 1 < argc) {
+            diff_config.window = std::strtoul(argv[++argi], nullptr, 10);
+            continue;
+        }
+
+        if (std::strcmp(argv[argi], "--context") == 0 && argi + 1 < argc) {
+            diff_config.context_lines = std::strtoul(argv[++argi], nullptr, 10);
+            continue;
+        }
+
+        if (std::strcmp(argv[argi], "--merge-distance") == 0 && argi + 1 < argc) {
+            diff_config.merge_distance = std::strtoull(argv[++argi], nullptr, 10);
             continue;
         }
 
@@ -135,6 +163,11 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        // merge nearby regions
+        if (sec1.executable && !no_lcs_flag) {
+            regions = merge_close_regions(regions, diff_config.merge_distance);
+        }
+
         if (regions.size() > 1) {
             printf("\n[%s] %zu changed regions:\n", sec1.name.c_str(), regions.size());
         } else printf("\n[%s] %zu changed region:\n", sec1.name.c_str(), regions.size());
@@ -146,7 +179,6 @@ int main(int argc, char** argv) {
             auto find_overlapping = [](const std::vector<bd::DisasmLine>& insns, uint64_t sec_vaddr, uint64_t off, uint64_t len) -> std::pair<size_t, size_t> {
                 uint64_t target_start = sec_vaddr + off;
                 uint64_t target_end = target_start + len;
-
                 size_t first = SIZE_MAX, last = SIZE_MAX;
                 for (size_t i = 0; i < insns.size(); i++) {
                     uint64_t insn_start = insns[i].address;
@@ -164,20 +196,32 @@ int main(int argc, char** argv) {
                 auto [new_first, new_last] = find_overlapping(new_insns, sec2.virtual_address, r.new_range.offset, r.new_range.length);
 
                 if (old_first == SIZE_MAX || new_first == SIZE_MAX) {
-                    continue; /* couldn't map this region to instructions */
+                    continue;
                 }
 
-                // grab 1 instruction of context before/after on each side
-                size_t old_ctx_first = old_first > 0 ? old_first - 1 : 0;
-                size_t old_ctx_last = std::min(old_last + 1, old_insns.size() - 1);
-                size_t new_ctx_first = new_first > 0 ? new_first - 1 : 0;
-                size_t new_ctx_last = std::min(new_last + 1, new_insns.size() - 1);
+                printf("\n%s\n", bd::cyan("[" + sec1.name + "] instruction diff:").c_str());
 
-                std::vector<bd::DisasmLine> old_slice(old_insns.begin() + old_ctx_first, old_insns.begin() + old_ctx_last + 1);
-                std::vector<bd::DisasmLine> new_slice(new_insns.begin() + new_ctx_first, new_insns.begin() + new_ctx_last + 1);
+                if (no_lcs_flag) {
+                    size_t old_ctx_first = old_first > 0 ? old_first - 1 : 0;
+                    size_t old_ctx_last = std::min(old_last + 1, old_insns.size() - 1);
+                    size_t new_ctx_first = new_first > 0 ? new_first - 1 : 0;
+                    size_t new_ctx_last = std::min(new_last + 1, new_insns.size() - 1);
 
-                printf("%s\n\n", bd::cyan("[" + sec1.name + "] instruction diff:").c_str());
-                bd::print_asm_diff(old_slice, new_slice);
+                    std::vector<bd::DisasmLine> old_slice(old_insns.begin() + old_ctx_first, old_insns.begin() + old_ctx_last + 1);
+                    std::vector<bd::DisasmLine> new_slice(new_insns.begin() + new_ctx_first, new_insns.begin() + new_ctx_last + 1);
+                    bd::print_asm_diff(old_slice, new_slice, diff_config.context_lines);
+                } else {
+                    size_t old_ctx_first = old_first > diff_config.window ? old_first - diff_config.window : 0;
+                    size_t old_ctx_last = std::min(old_last + diff_config.window, old_insns.size() - 1);
+                    size_t new_ctx_first = new_first > diff_config.window ? new_first - diff_config.window : 0;
+                    size_t new_ctx_last = std::min(new_last + diff_config.window, new_insns.size() - 1);
+
+                    std::vector<bd::DisasmLine> old_slice(old_insns.begin() + old_ctx_first, old_insns.begin() + old_ctx_last + 1);
+                    std::vector<bd::DisasmLine> new_slice(new_insns.begin() + new_ctx_first, new_insns.begin() + new_ctx_last + 1);
+
+                    auto alignment = bd::align_instructions(old_slice, new_slice);
+                    bd::print_insn_alignment(alignment, diff_config.context_lines);
+                }
             }
         } else {
             for (const auto& r : regions) {

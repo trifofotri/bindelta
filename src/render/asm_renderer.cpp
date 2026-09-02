@@ -1,4 +1,5 @@
 #include "render/asm_renderer.hpp"
+#include "diff/insn_diff.hpp"
 #include "render/color.hpp"
 
 #include <capstone/capstone.h>
@@ -45,7 +46,7 @@ namespace bd {
         return lines;
     }
 
-    static void print_line(const DisasmLine& l, const char* prefix, bool is_new, bool dimmed) {
+    void print_line(const DisasmLine& l, const char* prefix, bool is_new, bool dimmed) {
         std::ostringstream text;
         text << std::hex << std::setfill('0') << std::setw(8) << l.address << std::dec << "  "
             << std::left << std::setfill(' ') << std::setw(20) << l.bytes_hex
@@ -60,9 +61,10 @@ namespace bd {
         }
     }
 
-    void print_asm_diff(const std::vector<DisasmLine>& old_lines, const std::vector<DisasmLine>& new_lines) {
+    void print_asm_diff(const std::vector<DisasmLine>& old_lines, const std::vector<DisasmLine>& new_lines, size_t context_lines) {
         size_t max_len = std::max(old_lines.size(), new_lines.size());
-
+        
+        std::vector<Row> rows;
         for (size_t i = 0; i < max_len; i++) {
             bool has_old = i < old_lines.size();
             bool has_new = i < new_lines.size();
@@ -71,17 +73,45 @@ namespace bd {
                 const auto& o = old_lines[i];
                 const auto& n = new_lines[i];
                 bool same = o.bytes_hex == n.bytes_hex && o.mnemonic == n.mnemonic && o.operands == n.operands;
-
-                if (same) {
-                    print_line(o, " ", /*is_new=*/ false, /*dimmed=*/ true);
-                } else {
-                    print_line(o, "-", false, false);
-                    print_line(n, "+", true, false);
-                }
+                rows.push_back({same, &o, &n});
             } else if (has_old) {
-                print_line(old_lines[i], "-", false, false);
-            } else if (has_new) {
-                print_line(new_lines[i], "+", true, false);
+                rows.push_back({false, &old_lines[i], nullptr});
+            } else {
+                rows.push_back({false, nullptr, &new_lines[i]});
+            }
+        }
+
+        size_t i = 0;
+        while (i < rows.size()) {
+            if (!rows[i].same) {
+                if (rows[i].old_l) {
+                    print_line(*rows[i].old_l, "-", false, false);
+                }
+                if (rows[i].new_l) {
+                    print_line(*rows[i].new_l, "+", true, false);
+                }
+                i++;
+                continue;
+            }
+
+            size_t run_start = i;
+            while (i < rows.size() && rows[i].same) {
+                i++;
+            }
+            size_t run_len = i - run_start;
+
+            if (run_len <= context_lines * 2) {
+                for (size_t j = run_start; j < i; j++) {
+                    print_line(*rows[j].old_l, " ", false, true);
+                }
+            } else {
+                for (size_t j = run_start; j < run_start + context_lines; j++) {
+                    print_line(*rows[j].old_l, " ", false, true);
+                }
+                printf("%s\n", dim("  ... " + std::to_string(run_len - context_lines * 2) + " unchanged instruction(s) ...").c_str());
+                for (size_t j = i - context_lines; j < i; j++) {
+                    print_line(*rows[j].old_l, " ", false, true);
+                }
             }
         }
     }

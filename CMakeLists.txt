@@ -14,6 +14,7 @@ add_executable(bindelta
     src/binary/elf_file.cpp
     src/diff/byte_diff.cpp
     src/render/asm_renderer.cpp
+    src/diff/insn_diff.cpp
 )
 
 target_include_directories(bindelta PRIVATE include)

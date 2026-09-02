@@ -15,4 +15,6 @@ namespace bd {
 
     // compares two buffers up to min(a.size(), b.size())
     std::vector<DiffRegion> diff_bytes(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b);
+    
+    std::vector<bd::DiffRegion> merge_close_regions(const std::vector<bd::DiffRegion>& regions, uint64_t merge_distance);
 }
