@@ -23,6 +23,7 @@ namespace bd {
         for (size_t i = 0; i < count; i++) {
             DisasmLine line;
             line.address = insn[i].address;
+            line.length = insn[i].size;
             line.mnemonic = insn[i].mnemonic;
             line.operands = insn[i].op_str;
 

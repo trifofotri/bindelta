@@ -137,25 +137,50 @@ int main(int argc, char** argv) {
 
         printf("\n[%s] %zu changed region(s):\n", sec1.name.c_str(), regions.size());
         if (sec1.executable) {
+            auto old_insns = bd::disassemble(bytes1, sec1.virtual_address, elf1.is_64bit());
+            auto new_insns = bd::disassemble(bytes2, sec2.virtual_address, elf2.is_64bit());
+
+            auto find_overlapping = [](const std::vector<bd::DisasmLine>& insns, uint64_t sec_vaddr, uint64_t off, uint64_t len) -> std::pair<size_t, size_t> {
+                uint64_t target_start = sec_vaddr + off;
+                uint64_t target_end = target_start + len;
+
+                size_t first = SIZE_MAX, last = SIZE_MAX;
+                for (size_t i = 0; i < insns.size(); i++) {
+                    uint64_t insn_start = insns[i].address;
+                    uint64_t insn_end = insn_start + insns[i].length;
+                    if (insn_end > target_start && insn_start < target_end) {
+                        if (first == SIZE_MAX) first = i;
+                        last = i;
+                    }
+                }
+                return {first, last};
+            };
+
             for (const auto& r : regions) {
-                // grab a bit of context around the changed bytes
-                uint64_t ctx_start = r.old_range.offset > 4 ? r.old_range.offset - 4 : 0;
-                uint64_t ctx_len = r.old_range.length + 8;
+                auto [old_first, old_last] = find_overlapping(old_insns, sec1.virtual_address, r.old_range.offset, r.old_range.length);
+                auto [new_first, new_last] = find_overlapping(new_insns, sec2.virtual_address, r.new_range.offset, r.new_range.length);
 
-                std::vector<uint8_t> old_ctx(bytes1.begin() + ctx_start, bytes1.begin() + std::min(bytes1.size(), ctx_start + ctx_len));
-                std::vector<uint8_t> new_ctx(bytes2.begin() + ctx_start, bytes2.begin() + std::min(bytes2.size(), ctx_start + ctx_len));
+                if (old_first == SIZE_MAX || new_first == SIZE_MAX) {
+                    continue; /* couldn't map this region to instructions */
+                }
 
-                auto old_asm = bd::disassemble(old_ctx, sec1.virtual_address + ctx_start, elf1.is_64bit());
-                auto new_asm = bd::disassemble(new_ctx, sec2.virtual_address + ctx_start, elf2.is_64bit());
+                // grab 1 instruction of context before/after on each side
+                size_t old_ctx_first = old_first > 0 ? old_first - 1 : 0;
+                size_t old_ctx_last = std::min(old_last + 1, old_insns.size() - 1);
+                size_t new_ctx_first = new_first > 0 ? new_first - 1 : 0;
+                size_t new_ctx_last = std::min(new_last + 1, new_insns.size() - 1);
+
+                std::vector<bd::DisasmLine> old_slice(old_insns.begin() + old_ctx_first, old_insns.begin() + old_ctx_last + 1);
+                std::vector<bd::DisasmLine> new_slice(new_insns.begin() + new_ctx_first, new_insns.begin() + new_ctx_last + 1);
 
                 printf("\n%s\n", bd::cyan("[" + sec1.name + "] instruction diff:").c_str());
-                bd::print_asm_diff(old_asm, new_asm);
+                bd::print_asm_diff(old_slice, new_slice);
             }
         } else {
             for (const auto& r : regions) {
                 printf("  old: offset=0x%lx len=%lu   new: offset=0x%lx len=%lu\n", r.old_range.offset, r.old_range.length, r.new_range.offset, r.new_range.length);
             }
-        }  
+        }
     }
 
     // sections only present in binary2

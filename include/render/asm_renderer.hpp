@@ -6,6 +6,7 @@
 namespace bd {
     struct DisasmLine {
         uint64_t address;
+        uint32_t length;
         std::string bytes_hex;
         std::string mnemonic;
         std::string operands;
