@@ -9,11 +9,14 @@ namespace bd {
         const std::vector<Section>& sections() const override {
             return sections_;
         }
-        
+
         bool is_64bit() const override {
             return is64_;
         }
 
+        const std::vector<uint8_t>& raw() const override {
+            return raw_;
+        }
     private:
         std::vector<uint8_t> raw_;
         std::vector<Section> sections_;

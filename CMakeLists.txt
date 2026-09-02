@@ -11,6 +11,8 @@ add_subdirectory(third_party/capstone)
 
 add_executable(bindelta
     src/bindelta.cpp
+    src/binary/elf_file.cpp
+    src/diff/byte_diff.cpp
 )
 
 target_include_directories(bindelta PRIVATE include)

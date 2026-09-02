@@ -3,8 +3,11 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <unordered_map>
 
 #include "bindelta.hpp"
+#include "binary/elf_file.hpp"
+#include "diff/byte_diff.hpp"
 
 void print_usage_and_exit(char* ep) {
     printf("bindelta\n");
@@ -16,6 +19,11 @@ void print_usage_and_exit(char* ep) {
     exit(1);
 }
 
+std::vector<uint8_t> slice_section(const std::vector<uint8_t>& raw, const bd::Section& sec) {
+    if (sec.file_offset + sec.size > raw.size()) return {};
+    return std::vector<uint8_t>(raw.begin() + sec.file_offset, raw.begin() + sec.file_offset + sec.size);
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         print_usage_and_exit(argv[0]);
@@ -23,8 +31,7 @@ int main(int argc, char** argv) {
 
     bd::bdctx current_ctx;
     for (int argi = 1; argi < argc; argi++) {
-        if (std::strcmp(argv[argi], "-h") == 0 || std::strcmp(argv[argi], "--help") == 0 ) print_usage_and_exit(argv[0]);
-        
+        if (std::strcmp(argv[argi], "-h") == 0 || std::strcmp(argv[argi], "--help") == 0) print_usage_and_exit(argv[0]);
         if (current_ctx.binary1path.empty()) {
             current_ctx.binary1path = argv[argi];
         } else {
@@ -45,19 +52,66 @@ int main(int argc, char** argv) {
         printf("%s: File does not exist.\n", current_ctx.binary2path.c_str());
         return 1;
     }
-    
+
     size_t b1size = std::filesystem::file_size(current_ctx.binary1path);
     size_t b2size = std::filesystem::file_size(current_ctx.binary2path);
     printf("Comparing %s (%zu bytes) and %s (%zu bytes)...\n", current_ctx.binary1path.c_str(), b1size, current_ctx.binary2path.c_str(), b2size);
-    
-    char* b1 = reinterpret_cast<char *>(malloc(b1size));
-    char* b2 = reinterpret_cast<char *>(malloc(b2size));
 
-    b1fs.read(b1, b1size);
-    b2fs.read(b2, b2size);
+    std::vector<uint8_t> b1(b1size);
+    std::vector<uint8_t> b2(b2size);
 
-    if (memcmp(b1, "\x7F" "ELF", 4) == 0) {
+    b1fs.read(reinterpret_cast<char*>(b1.data()), b1size);
+    b2fs.read(reinterpret_cast<char*>(b2.data()), b2size);
 
+    bool b1_is_elf = b1.size() >= 4 && memcmp(b1.data(), "\x7F" "ELF", 4) == 0;
+    bool b2_is_elf = b2.size() >= 4 && memcmp(b2.data(), "\x7F" "ELF", 4) == 0;
+
+    if (!b1_is_elf || !b2_is_elf) {
+        printf("Only ELF binaries are supported right now.\n");
+        return 1;
     }
+
+    std::vector<uint8_t> b1_raw = b1;
+    std::vector<uint8_t> b2_raw = b2;
+
+    bd::ElfFile elf1(std::move(b1));
+    bd::ElfFile elf2(std::move(b2));
+
+    std::unordered_map<std::string, const bd::Section*> b2_sections_by_name;
+    for (const auto& sec : elf2.sections()) {
+        b2_sections_by_name[sec.name] = &sec;
+    }
+
+    for (const auto& sec1 : elf1.sections()) {
+        auto it = b2_sections_by_name.find(sec1.name);
+        if (it == b2_sections_by_name.end()) {
+            printf("[removed] %s (not present in %s)\n", sec1.name.c_str(), current_ctx.binary2path.c_str());
+            continue;
+        }
+
+        const bd::Section& sec2 = *it->second;
+        std::vector<uint8_t> bytes1 = slice_section(b1_raw, sec1);
+        std::vector<uint8_t> bytes2 = slice_section(b2_raw, sec2);
+
+        auto regions = bd::diff_bytes(bytes1, bytes2);
+        if (regions.empty()) {
+            continue;
+        }
+
+        printf("\n[%s] %zu changed region(s):\n", sec1.name.c_str(), regions.size());
+        for (const auto& r : regions) {
+            printf("  old: offset=0x%lx len=%lu   new: offset=0x%lx len=%lu\n", r.old_range.offset, r.old_range.length, r.new_range.offset, r.new_range.length);
+        }
+    }
+
+    // sections only present in binary2
+    std::unordered_map<std::string, bool> b1_names;
+    for (const auto& sec : elf1.sections()) b1_names[sec.name] = true;
+    for (const auto& sec : elf2.sections()) {
+        if (!b1_names.count(sec.name)) {
+            printf("[added] %s (not present in %s)\n", sec.name.c_str(), current_ctx.binary1path.c_str());
+        }
+    }
+
     return 0;
 }

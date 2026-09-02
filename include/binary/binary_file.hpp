@@ -10,7 +10,6 @@ namespace bd {
         uint64_t file_offset;
         uint64_t size;
         bool executable;
-        std::vector<uint8_t> data;
     };
 
     class BinaryFile {
@@ -18,5 +17,6 @@ namespace bd {
         virtual ~BinaryFile() = default;
         virtual const std::vector<Section>& sections() const = 0;
         virtual bool is_64bit() const = 0;
+        virtual const std::vector<uint8_t>& raw() const = 0;
     };
 }

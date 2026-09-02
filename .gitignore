@@ -3,3 +3,6 @@ build/
 compile_commands.json
 cat
 c.txt
+echo
+test/program1
+test/program2
