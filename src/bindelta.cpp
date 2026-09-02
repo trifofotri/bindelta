@@ -135,7 +135,10 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        printf("\n[%s] %zu changed region(s):\n", sec1.name.c_str(), regions.size());
+        if (regions.size() > 1) {
+            printf("\n[%s] %zu changed regions:\n", sec1.name.c_str(), regions.size());
+        } else printf("\n[%s] %zu changed region:\n", sec1.name.c_str(), regions.size());
+        
         if (sec1.executable) {
             auto old_insns = bd::disassemble(bytes1, sec1.virtual_address, elf1.is_64bit());
             auto new_insns = bd::disassemble(bytes2, sec2.virtual_address, elf2.is_64bit());
@@ -173,7 +176,7 @@ int main(int argc, char** argv) {
                 std::vector<bd::DisasmLine> old_slice(old_insns.begin() + old_ctx_first, old_insns.begin() + old_ctx_last + 1);
                 std::vector<bd::DisasmLine> new_slice(new_insns.begin() + new_ctx_first, new_insns.begin() + new_ctx_last + 1);
 
-                printf("\n%s\n", bd::cyan("[" + sec1.name + "] instruction diff:").c_str());
+                printf("%s\n\n", bd::cyan("[" + sec1.name + "] instruction diff:").c_str());
                 bd::print_asm_diff(old_slice, new_slice);
             }
         } else {
