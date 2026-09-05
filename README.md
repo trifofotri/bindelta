@@ -4,7 +4,7 @@ A simple binary diffing tool that renders changed code as disassembly with capst
 
 *bindelta* compares two binaries at the byte level and disassembles the before/after code with [Capstone](https://www.capstone-engine.org/). Executable sections are aligned using an [LCS](https://en.wikipedia.org/wiki/Longest_common_subsequence)-based diff.
 
-> **Note:** only ELF binaries are supported right now. Raw binary & PE support is planned.
+> **Note:** only ELF and raw binaries are supported currently.
 
 ```diff
 $ bindelta test/program1 test/program2
@@ -48,8 +48,24 @@ Options:
 -h    --help                   displays this
 -v    --verbose                show noisy metadata sections (build-id, comments, etc.)
 -nc   --no-color               disable colored output
--nlcs --no-lcs                 disable instruction-level alignment, fall back to raw positional instruction diff
+-nlcs --no-lcs                 disable alignment, maybe for speed, fall back to raw diff.
       --window <n>             instructions of context grabbed around each diff region (default 40)
       --context <n>            unchanged lines shown before/after a real change, rest collapsed (default 2)
       --merge-distance <n>     byte distance under which nearby diff regions get merged (default 128)
+```
+
+### Raw binaries
+
+A binary can be marked as raw using `path@base_addr`, optionally with a range to scan:
+
+```
+path@base_addr treat as raw, loaded at base_addr
+path@base_addr:start-end same, but only scan file offsets [start,end]
+```
+
+Examples:
+
+```bash
+bindelta firmware1.bin@0x8000 firmware2.bin@0x8000
+bindelta firmware1.bin@0x8000:0x100-0x2000 firmware2.bin@0x8000
 ```
